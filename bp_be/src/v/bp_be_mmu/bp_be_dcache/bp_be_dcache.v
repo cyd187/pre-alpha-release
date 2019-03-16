@@ -241,23 +241,72 @@ module bp_be_dcache
   logic [ways_p-1:0][data_width_p-1:0] data_mem_data_li;
   logic [ways_p-1:0][data_mask_width_lp-1:0] data_mem_mask_li;
   logic [ways_p-1:0][data_width_p-1:0] data_mem_data_lo;
-  
+  logic [ways_p-1:0][data_width_p-1:0] data_mem_data_low_lo;
+  logic [ways_p-1:0][data_width_p-1:0] data_mem_data_high_lo;
+    
   for (genvar i = 0; i < ways_p; i++) begin
+   // logic [data_width_p-1:0] data_mem_data_low;
+   // logic [data_width_p-1:0] data_mem_data_high;
+    logic sel,v_low,v_high;
+    logic ps,ns;
+    assign v_low = (data_mem_v_li[i] & ~data_mem_addr_li[i][index_width_lp+word_offset_width_lp-1]);
+    assign v_high = (data_mem_v_li[i] & data_mem_addr_li[i][index_width_lp+word_offset_width_lp-1]);
+
+    always_comb begin
+        case(ps)
+            1'b0: if(v_high) ns = 1'b1; else ns = 1'b0;
+            1'b1: if(v_low) ns = 1'b0; else ns = 1'b1;
+        endcase
+        sel = (ns == 1'b1); 
+    end
+
+    always_ff @(posedge clk_i) begin
+        if(reset_i) ps <= 1'b0;
+        else ps <= ns;
+    end
+
     bsg_mem_1rw_sync_mask_write_byte
       #(.data_width_p(data_width_p)
-        ,.els_p(sets_p*ways_p)
+        ,.els_p(sets_p*ways_p/2)
         ,.enable_clock_gating_p(1'b1)
         )
-      data_mem
+      data_mem_low
         (.clk_i(clk_i)
         ,.reset_i(reset_i)
-        ,.v_i(~reset_i & data_mem_v_li[i])
+        ,.v_i(~reset_i & v_low)
         ,.w_i(data_mem_w_li[i])
-        ,.addr_i(data_mem_addr_li[i])
+        ,.addr_i(data_mem_addr_li[i][index_width_lp+word_offset_width_lp-2:0])
         ,.data_i(data_mem_data_li[i])
         ,.write_mask_i(data_mem_mask_li[i])
-        ,.data_o(data_mem_data_lo[i])
+        ,.data_o(data_mem_data_low_lo[i])
         );
+    bsg_mem_1rw_sync_mask_write_byte
+      #(.data_width_p(data_width_p)
+        ,.els_p(sets_p*ways_p/2)
+        ,.enable_clock_gating_p(1'b1)
+        )
+      data_mem_high
+        (.clk_i(clk_i)
+        ,.reset_i(reset_i)
+        ,.v_i(~reset_i & v_high)
+        ,.w_i(data_mem_w_li[i])
+        ,.addr_i(data_mem_addr_li[i][index_width_lp+word_offset_width_lp-2:0])
+        ,.data_i(data_mem_data_li[i])
+        ,.write_mask_i(data_mem_mask_li[i])
+        ,.data_o(data_mem_data_high_lo[i])
+        );
+    assign data_mem_data_lo[i] = (sel)?data_mem_data_high_lo[i]:data_mem_data_low_lo[i];
+   //assign data_mem_data_lo[i] = data_mem_data_high_lo[i];
+   /* bsg_mux 
+      #(.width_p(64)
+        ,.els_p(2)
+        )
+      whichmem_mux
+      (.data_i({data_mem_data_high_lo[i],data_mem_data_low_lo[i]})
+      ,.sel_i(data_mem_addr_li[i][index_width_lp+word_offset_width_lp-1])
+      ,.data_o(data_mem_data_lo[i])
+      );
+     */ 
   end
 
   // TV stage
